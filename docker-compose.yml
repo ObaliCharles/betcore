@@ -1,0 +1,62 @@
+services:
+
+  # ── PostgreSQL — primary data store ──────────────────────────
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: betcore
+      POSTGRES_USER: betcore
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"          # host:container
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U betcore"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis — cache + pub/sub for WebSocket ────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI backend ───────────────────────────────────────────
+  backend:
+    build: ./backend
+    ports:
+      - "8001:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app    # hot-reload: your code changes reflect instantly
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── Next.js frontend ─────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules   # keep container's node_modules separate
+      - /app/.next
+
+volumes:
+  postgres_data:            # named volume — survives container restarts
